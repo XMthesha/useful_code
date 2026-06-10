@@ -1,0 +1,72 @@
+# ADC Bin Reader
+
+`adc_bin_reader.py` is a small Python command-line utility for viewing ADC data
+stored in a `.bin` file. It prints each fixed-width sample as decimal, hex, or
+both.
+
+## Basic Usage
+
+From VS Code Terminal or PowerShell:
+
+```powershell
+python .\adc_bin_reader.py path\to\data.bin
+```
+
+If Windows only has the Python Launcher available, use `py` instead:
+
+```powershell
+py .\adc_bin_reader.py path\to\data.bin
+```
+
+Default assumptions:
+
+- 2 bytes per sample
+- little-endian byte order
+- unsigned values
+- output includes both decimal and hex
+
+## Common Examples
+
+Read the first 32 unsigned 16-bit samples:
+
+```powershell
+python .\adc_bin_reader.py data.bin -b 2 -n 32
+```
+
+Read signed 16-bit samples:
+
+```powershell
+python .\adc_bin_reader.py data.bin -b 2 --signed
+```
+
+Read 24-bit ADC samples, big-endian, and show both decimal and hex:
+
+```powershell
+python .\adc_bin_reader.py data.bin -b 3 -e big --signed -f both
+```
+
+Start from byte offset `0x100` and print 20 samples:
+
+```powershell
+python .\adc_bin_reader.py data.bin -o 0x100 -n 20
+```
+
+Export the decoded values to CSV:
+
+```powershell
+python .\adc_bin_reader.py data.bin -b 3 -e big --signed --csv decoded.csv
+```
+
+## Output
+
+Example:
+
+```text
+index,dec,hex
+0,123,0x007B
+1,-8,0xFFF8
+2,2048,0x0800
+```
+
+`hex` is always the raw ADC sample value before signed conversion. `dec` is the
+interpreted value, so it changes when `--signed` is used.
