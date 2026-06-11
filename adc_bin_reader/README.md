@@ -56,6 +56,13 @@ then reads 8 bytes per index:
 python .\adc_128ch_reader.py data.bin -w 16 -e little -f hex -n 128
 ```
 
+If the file stores channels as `CH4_CH3_CH2_CH1`, and each 16-bit channel itself
+is little-endian, use channel-level endian parsing:
+
+```powershell
+python .\adc_128ch_reader.py data.bin -w 16 --channel-order ch4_ch3_ch2_ch1 --channel-endian little -s -f both -n 128
+```
+
 Read signed 16-bit samples:
 
 ```powershell
@@ -101,3 +108,8 @@ interpreted value, so it changes when `--signed` is used.
 - `-n`, `--count`: number of indexes/samples to print, not number of bytes.
 - `adc_128ch_reader.py -w`, `--channel-bits`: bit width of each channel.
   Default is `32`; use `-w 16` for 16-bit CH1~CH4 data.
+- `adc_128ch_reader.py --channel-endian`: byte order inside each CH. Use this
+  when the file is stored channel by channel, for example each 16-bit CH is
+  little-endian.
+- `adc_128ch_reader.py --channel-order`: channel order in the file when using
+  `--channel-endian`. Default is `ch4_ch3_ch2_ch1`.
