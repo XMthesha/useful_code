@@ -7,11 +7,12 @@
 #   python .\adc_128ch_reader.py data.bin -e little -f hex -n 128
 #
 # 说明：
-#   -e little/big  指 128bit 数据在 bin 文件中的字节序，默认 little
-#   -s             把每个 32bit CH 按有符号补码解释，默认无符号
+#   -w, --channel-bits  每个 CH 的位宽，默认 32；例如 16 表示每个 CH 是 16bit
+#   -e little/big       指整个 index 数据在 bin 文件中的字节序，默认 little
+#   -s                  把每个 CH 按有符号补码解释，默认无符号
 #   -f             输出格式，默认 both；可选 dec/hex/both
 #   -o             起始字节偏移，默认 0；支持 256 或 0x100
-#   -n             最多读取多少个 128bit index，默认读取全部
+#   -n             最多读取多少个 index，默认读取全部
 #   --csv          额外保存 CSV 文件，默认不保存
 
 from __future__ import annotations
@@ -24,30 +25,51 @@ from pathlib import Path
 from adc_bin_reader import read_samples, sign_extend
 
 
-WORD_BYTES = 16
-CHANNEL_BITS = 32
-CHANNEL_MASK = (1 << CHANNEL_BITS) - 1
+CHANNEL_COUNT = 4
+DEFAULT_CHANNEL_BITS = 32
 CHANNEL_NAMES = ("CH1", "CH2", "CH3", "CH4")
+
+
+def parse_channel_bits(value: str) -> int:
+    try:
+        channel_bits = int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer, such as 16 or 32") from exc
+
+    if channel_bits <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    if channel_bits % 8 != 0:
+        raise argparse.ArgumentTypeError("must be a multiple of 8")
+    if channel_bits > 64:
+        raise argparse.ArgumentTypeError("must be <= 64")
+    return channel_bits
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Read 128-bit ADC words and split [127:0]=CH4_CH3_CH2_CH1.",
+        description="Read ADC words and split them as CH4_CH3_CH2_CH1.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("bin_file", type=Path, help="Path to the .bin file")
+    parser.add_argument(
+        "-w",
+        "--channel-bits",
+        type=parse_channel_bits,
+        default=DEFAULT_CHANNEL_BITS,
+        help="Bit width of each channel, such as 16 or 32",
+    )
     parser.add_argument(
         "-e",
         "--endian",
         choices=("little", "big"),
         default="little",
-        help="Byte order used by each 128-bit word in the .bin file",
+        help="Byte order used by each whole index/word in the .bin file",
     )
     parser.add_argument(
         "-s",
         "--signed",
         action="store_true",
-        help="Interpret each 32-bit channel as signed two's-complement",
+        help="Interpret each channel as signed two's-complement",
     )
     parser.add_argument(
         "-f",
@@ -68,7 +90,7 @@ def parse_args() -> argparse.Namespace:
         "--count",
         type=int,
         default=None,
-        help="Maximum number of 128-bit indexes to print",
+        help="Maximum number of indexes to print",
     )
     parser.add_argument(
         "--csv",
@@ -79,24 +101,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def split_channels(raw_128: int, *, signed: bool) -> tuple[int, int, int, int]:
+def word_bytes(channel_bits: int) -> int:
+    return CHANNEL_COUNT * channel_bits // 8
+
+
+def split_channels(raw_word: int, *, channel_bits: int, signed: bool) -> tuple[int, ...]:
+    channel_mask = (1 << channel_bits) - 1
     channels: list[int] = []
-    for channel_index in range(4):
-        raw_ch = (raw_128 >> (channel_index * CHANNEL_BITS)) & CHANNEL_MASK
-        channels.append(sign_extend(raw_ch, CHANNEL_BITS) if signed else raw_ch)
+    for channel_index in range(CHANNEL_COUNT):
+        raw_ch = (raw_word >> (channel_index * channel_bits)) & channel_mask
+        channels.append(sign_extend(raw_ch, channel_bits) if signed else raw_ch)
     return tuple(channels)  # CH1, CH2, CH3, CH4
 
 
-def channel_hex_values(raw_128: int) -> tuple[str, str, str, str]:
+def channel_hex_values(raw_word: int, *, channel_bits: int) -> tuple[str, ...]:
+    channel_mask = (1 << channel_bits) - 1
+    hex_digits = channel_bits // 4
     values: list[str] = []
-    for channel_index in range(4):
-        raw_ch = (raw_128 >> (channel_index * CHANNEL_BITS)) & CHANNEL_MASK
-        values.append(f"0x{raw_ch:08X}")
+    for channel_index in range(CHANNEL_COUNT):
+        raw_ch = (raw_word >> (channel_index * channel_bits)) & channel_mask
+        values.append(f"0x{raw_ch:0{hex_digits}X}")
     return tuple(values)  # CH1, CH2, CH3, CH4
 
 
 def print_rows(
-    rows: list[tuple[int, tuple[int, int, int, int], tuple[str, str, str, str]]],
+    rows: list[tuple[int, tuple[int, ...], tuple[str, ...]]],
     *,
     output_format: str,
 ) -> None:
@@ -122,7 +151,7 @@ def print_rows(
 
 def write_csv(
     csv_file: Path,
-    rows: list[tuple[int, tuple[int, int, int, int], tuple[str, str, str, str]]],
+    rows: list[tuple[int, tuple[int, ...], tuple[str, ...]]],
     *,
     output_format: str,
 ) -> None:
@@ -150,10 +179,11 @@ def write_csv(
 
 def main() -> int:
     args = parse_args()
+    bytes_per_word = word_bytes(args.channel_bits)
     try:
         words = read_samples(
             args.bin_file,
-            bytes_per_sample=WORD_BYTES,
+            bytes_per_sample=bytes_per_word,
             endian=args.endian,
             signed=False,
             offset=args.offset,
@@ -167,12 +197,12 @@ def main() -> int:
         return 2
 
     rows = []
-    for index, raw_128, _value in words:
+    for index, raw_word, _value in words:
         rows.append(
             (
                 index,
-                split_channels(raw_128, signed=args.signed),
-                channel_hex_values(raw_128),
+                split_channels(raw_word, channel_bits=args.channel_bits, signed=args.signed),
+                channel_hex_values(raw_word, channel_bits=args.channel_bits),
             )
         )
 

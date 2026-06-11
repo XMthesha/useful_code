@@ -49,6 +49,13 @@ python .\adc_128ch_reader.py data.bin -e little -f hex -n 128
 If the 128-bit word is printed as `0xCH4CH3CH2CH1`, the channel reader outputs
 columns in this order: `CH1,CH2,CH3,CH4`.
 
+For another data format where each channel is 16 bits, use `-w 16`. The script
+then reads 8 bytes per index:
+
+```powershell
+python .\adc_128ch_reader.py data.bin -w 16 -e little -f hex -n 128
+```
+
 Read signed 16-bit samples:
 
 ```powershell
@@ -92,3 +99,5 @@ interpreted value, so it changes when `--signed` is used.
 - `-b`, `--bytes-per-sample`: bytes in one output index/sample. Default is `2`.
   Use `-b 16` for 128-bit data.
 - `-n`, `--count`: number of indexes/samples to print, not number of bytes.
+- `adc_128ch_reader.py -w`, `--channel-bits`: bit width of each channel.
+  Default is `32`; use `-w 16` for 16-bit CH1~CH4 data.
