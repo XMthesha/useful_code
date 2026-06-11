@@ -1,8 +1,8 @@
 # ADC Bin Reader
 
 `adc_bin_reader.py` is a small Python command-line utility for viewing ADC data
-stored in a `.bin` file. It prints each fixed-width sample as decimal, hex, or
-both.
+stored in a `.bin` file. It prints each fixed-width index/sample as decimal,
+hex, or both.
 
 ## Basic Usage
 
@@ -20,7 +20,7 @@ py .\adc_bin_reader.py path\to\data.bin
 
 Default assumptions:
 
-- 2 bytes per sample
+- 2 bytes per index/sample
 - little-endian byte order
 - unsigned values
 - output includes both decimal and hex
@@ -31,6 +31,12 @@ Read the first 32 unsigned 16-bit samples:
 
 ```powershell
 python .\adc_bin_reader.py data.bin -b 2 -n 32
+```
+
+Read the first 128 indexes, with each index containing 16 bytes / 128 bits:
+
+```powershell
+python .\adc_bin_reader.py data.bin -b 16 -f hex -n 128
 ```
 
 Read signed 16-bit samples:
@@ -70,3 +76,9 @@ index,dec,hex
 
 `hex` is always the raw ADC sample value before signed conversion. `dec` is the
 interpreted value, so it changes when `--signed` is used.
+
+## Options
+
+- `-b`, `--bytes-per-sample`: bytes in one output index/sample. Default is `2`.
+  Use `-b 16` for 128-bit data.
+- `-n`, `--count`: number of indexes/samples to print, not number of bytes.

@@ -8,7 +8,7 @@
 #
 # 配置项：
 #   bin_file                  要读取的 .bin 文件路径，必填
-#   -b, --bytes-per-sample    每个采样点占几个字节，默认 2；可选 1/2/3/4
+#   -b, --bytes-per-sample    每个 index/采样点占几个字节，默认 2；如 16 表示 128bit
 #   -e, --endian              字节序，默认 little；可选 little/big
 #   -s, --signed              按有符号补码解释数据，默认无符号
 #   -f, --format              输出格式，默认 both；可选 dec/hex/both
@@ -31,7 +31,21 @@ import sys
 from pathlib import Path
 
 
-SUPPORTED_SAMPLE_BYTES = {1, 2, 3, 4}
+MIN_BYTES_PER_SAMPLE = 1
+MAX_BYTES_PER_SAMPLE = 64
+
+
+def parse_bytes_per_sample(value: str) -> int:
+    try:
+        bytes_per_sample = int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer, such as 4 or 0x10") from exc
+
+    if not MIN_BYTES_PER_SAMPLE <= bytes_per_sample <= MAX_BYTES_PER_SAMPLE:
+        raise argparse.ArgumentTypeError(
+            f"must be between {MIN_BYTES_PER_SAMPLE} and {MAX_BYTES_PER_SAMPLE}"
+        )
+    return bytes_per_sample
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,10 +57,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-b",
         "--bytes-per-sample",
-        type=int,
+        type=parse_bytes_per_sample,
         default=2,
-        choices=sorted(SUPPORTED_SAMPLE_BYTES),
-        help="Number of bytes in one ADC sample",
+        help="Number of bytes in one index/sample, such as 4 for 32-bit or 16 for 128-bit",
     )
     parser.add_argument(
         "-e",
