@@ -63,6 +63,13 @@ is little-endian, use channel-level endian parsing:
 python .\adc_128ch_reader.py data.bin -w 16 --channel-order ch4_ch3_ch2_ch1 --channel-endian little -s -f both -n 128
 ```
 
+If the ADC data should be read as unsigned first, then shifted by mid-scale
+offset, use `--subtract`. For 16-bit data this is usually `32768`:
+
+```powershell
+python .\adc_128ch_reader.py data.bin -w 16 --channel-order ch4_ch3_ch2_ch1 --channel-endian little --subtract 32768 -f both -n 128
+```
+
 Read signed 16-bit samples:
 
 ```powershell
@@ -113,3 +120,6 @@ interpreted value, so it changes when `--signed` is used.
   little-endian.
 - `adc_128ch_reader.py --channel-order`: channel order in the file when using
   `--channel-endian`. Default is `ch4_ch3_ch2_ch1`.
+- `adc_128ch_reader.py --subtract`: subtract a fixed value from each decoded
+  decimal channel value. This does not change the raw hex output. Use
+  `--subtract 32768` for 16-bit offset-binary data.

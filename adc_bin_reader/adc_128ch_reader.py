@@ -12,6 +12,7 @@
 #   --channel-endian    每个 CH 内部的字节序；设置后进入“按通道分块”解析
 #   --channel-order     bin 文件里 4 个 CH 的排列顺序，默认 ch4_ch3_ch2_ch1
 #   -s                  把每个 CH 按有符号补码解释，默认无符号
+#   --subtract          从读出的十进制结果中减去一个固定值，默认 0
 #   -f             输出格式，默认 both；可选 dec/hex/both
 #   -o             起始字节偏移，默认 0；支持 256 或 0x100
 #   -n             最多读取多少个 index，默认读取全部
@@ -49,6 +50,13 @@ def parse_channel_bits(value: str) -> int:
     if channel_bits > 64:
         raise argparse.ArgumentTypeError("must be <= 64")
     return channel_bits
+
+
+def parse_int_value(value: str) -> int:
+    try:
+        return int(value, 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer, such as 32768 or 0x8000") from exc
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,6 +98,12 @@ def parse_args() -> argparse.Namespace:
         help="Interpret each channel as signed two's-complement",
     )
     parser.add_argument(
+        "--subtract",
+        type=parse_int_value,
+        default=0,
+        help="Subtract this value from each decoded decimal channel value",
+    )
+    parser.add_argument(
         "-f",
         "--format",
         choices=("dec", "hex", "both"),
@@ -127,12 +141,25 @@ def channel_bytes(channel_bits: int) -> int:
     return channel_bits // 8
 
 
-def split_channels(raw_word: int, *, channel_bits: int, signed: bool) -> tuple[int, ...]:
+def decode_channel(raw_ch: int, *, channel_bits: int, signed: bool, subtract: int) -> int:
+    value = sign_extend(raw_ch, channel_bits) if signed else raw_ch
+    return value - subtract
+
+
+def split_channels(
+    raw_word: int,
+    *,
+    channel_bits: int,
+    signed: bool,
+    subtract: int,
+) -> tuple[int, ...]:
     channel_mask = (1 << channel_bits) - 1
     channels: list[int] = []
     for channel_index in range(CHANNEL_COUNT):
         raw_ch = (raw_word >> (channel_index * channel_bits)) & channel_mask
-        channels.append(sign_extend(raw_ch, channel_bits) if signed else raw_ch)
+        channels.append(
+            decode_channel(raw_ch, channel_bits=channel_bits, signed=signed, subtract=subtract)
+        )
     return tuple(channels)  # CH1, CH2, CH3, CH4
 
 
@@ -153,6 +180,7 @@ def read_channel_split_rows(
     channel_endian: str,
     channel_order: str,
     signed: bool,
+    subtract: int,
     offset: int,
     count: int | None,
 ) -> list[tuple[int, tuple[int, ...], tuple[str, ...]]]:
@@ -191,7 +219,9 @@ def read_channel_split_rows(
             ch_start = file_pos * ch_bytes
             raw_bytes = word[ch_start : ch_start + ch_bytes]
             raw_ch = int.from_bytes(raw_bytes, byteorder=channel_endian, signed=False)
-            dec_by_name[channel_name] = sign_extend(raw_ch, channel_bits) if signed else raw_ch
+            dec_by_name[channel_name] = decode_channel(
+                raw_ch, channel_bits=channel_bits, signed=signed, subtract=subtract
+            )
             hex_by_name[channel_name] = f"0x{raw_ch:0{hex_digits}X}"
 
         rows.append(
@@ -275,7 +305,12 @@ def main() -> int:
                 rows.append(
                     (
                         index,
-                        split_channels(raw_word, channel_bits=args.channel_bits, signed=args.signed),
+                        split_channels(
+                            raw_word,
+                            channel_bits=args.channel_bits,
+                            signed=args.signed,
+                            subtract=args.subtract,
+                        ),
                         channel_hex_values(raw_word, channel_bits=args.channel_bits),
                     )
                 )
@@ -286,6 +321,7 @@ def main() -> int:
                 channel_endian=args.channel_endian,
                 channel_order=args.channel_order,
                 signed=args.signed,
+                subtract=args.subtract,
                 offset=args.offset,
                 count=args.count,
             )
