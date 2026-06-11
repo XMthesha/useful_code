@@ -39,6 +39,16 @@ Read the first 128 indexes, with each index containing 16 bytes / 128 bits:
 python .\adc_bin_reader.py data.bin -b 16 -f hex -n 128
 ```
 
+Split 128-bit words into four 32-bit channels when
+`[127:0] = CH4_CH3_CH2_CH1`:
+
+```powershell
+python .\adc_128ch_reader.py data.bin -e little -f hex -n 128
+```
+
+If the 128-bit word is printed as `0xCH4CH3CH2CH1`, the channel reader outputs
+columns in this order: `CH1,CH2,CH3,CH4`.
+
 Read signed 16-bit samples:
 
 ```powershell

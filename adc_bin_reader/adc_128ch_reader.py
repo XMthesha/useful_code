@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+# 作用：
+#   调用 adc_bin_reader.py 读取每个 128bit 数据，然后按
+#   [127:0] = CH4_CH3_CH2_CH1 拆成 4 个 32bit 通道输出。
+#
+# 基本用法：
+#   python .\adc_128ch_reader.py data.bin -e little -f hex -n 128
+#
+# 说明：
+#   -e little/big  指 128bit 数据在 bin 文件中的字节序，默认 little
+#   -s             把每个 32bit CH 按有符号补码解释，默认无符号
+#   -f             输出格式，默认 both；可选 dec/hex/both
+#   -o             起始字节偏移，默认 0；支持 256 或 0x100
+#   -n             最多读取多少个 128bit index，默认读取全部
+#   --csv          额外保存 CSV 文件，默认不保存
+
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from pathlib import Path
+
+from adc_bin_reader import read_samples, sign_extend
+
+
+WORD_BYTES = 16
+CHANNEL_BITS = 32
+CHANNEL_MASK = (1 << CHANNEL_BITS) - 1
+CHANNEL_NAMES = ("CH1", "CH2", "CH3", "CH4")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Read 128-bit ADC words and split [127:0]=CH4_CH3_CH2_CH1.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("bin_file", type=Path, help="Path to the .bin file")
+    parser.add_argument(
+        "-e",
+        "--endian",
+        choices=("little", "big"),
+        default="little",
+        help="Byte order used by each 128-bit word in the .bin file",
+    )
+    parser.add_argument(
+        "-s",
+        "--signed",
+        action="store_true",
+        help="Interpret each 32-bit channel as signed two's-complement",
+    )
+    parser.add_argument(
+        "-f",
+        "--format",
+        choices=("dec", "hex", "both"),
+        default="both",
+        help="Output number format for each channel",
+    )
+    parser.add_argument(
+        "-o",
+        "--offset",
+        type=lambda value: int(value, 0),
+        default=0,
+        help="Start byte offset, decimal or hex such as 128 or 0x80",
+    )
+    parser.add_argument(
+        "-n",
+        "--count",
+        type=int,
+        default=None,
+        help="Maximum number of 128-bit indexes to print",
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="Optional CSV output path",
+    )
+    return parser.parse_args()
+
+
+def split_channels(raw_128: int, *, signed: bool) -> tuple[int, int, int, int]:
+    channels: list[int] = []
+    for channel_index in range(4):
+        raw_ch = (raw_128 >> (channel_index * CHANNEL_BITS)) & CHANNEL_MASK
+        channels.append(sign_extend(raw_ch, CHANNEL_BITS) if signed else raw_ch)
+    return tuple(channels)  # CH1, CH2, CH3, CH4
+
+
+def channel_hex_values(raw_128: int) -> tuple[str, str, str, str]:
+    values: list[str] = []
+    for channel_index in range(4):
+        raw_ch = (raw_128 >> (channel_index * CHANNEL_BITS)) & CHANNEL_MASK
+        values.append(f"0x{raw_ch:08X}")
+    return tuple(values)  # CH1, CH2, CH3, CH4
+
+
+def print_rows(
+    rows: list[tuple[int, tuple[int, int, int, int], tuple[str, str, str, str]]],
+    *,
+    output_format: str,
+) -> None:
+    if output_format == "dec":
+        print("index," + ",".join(CHANNEL_NAMES))
+        for index, dec_values, _hex_values in rows:
+            print(f"{index}," + ",".join(str(value) for value in dec_values))
+    elif output_format == "hex":
+        print("index," + ",".join(CHANNEL_NAMES))
+        for index, _dec_values, hex_values in rows:
+            print(f"{index}," + ",".join(hex_values))
+    else:
+        headers = []
+        for name in CHANNEL_NAMES:
+            headers.extend((f"{name}_dec", f"{name}_hex"))
+        print("index," + ",".join(headers))
+        for index, dec_values, hex_values in rows:
+            cells: list[str] = []
+            for dec_value, hex_value in zip(dec_values, hex_values):
+                cells.extend((str(dec_value), hex_value))
+            print(f"{index}," + ",".join(cells))
+
+
+def write_csv(
+    csv_file: Path,
+    rows: list[tuple[int, tuple[int, int, int, int], tuple[str, str, str, str]]],
+    *,
+    output_format: str,
+) -> None:
+    with csv_file.open("w", newline="", encoding="utf-8") as output:
+        writer = csv.writer(output)
+        if output_format == "dec":
+            writer.writerow(["index", *CHANNEL_NAMES])
+            for index, dec_values, _hex_values in rows:
+                writer.writerow([index, *dec_values])
+        elif output_format == "hex":
+            writer.writerow(["index", *CHANNEL_NAMES])
+            for index, _dec_values, hex_values in rows:
+                writer.writerow([index, *hex_values])
+        else:
+            headers = []
+            for name in CHANNEL_NAMES:
+                headers.extend((f"{name}_dec", f"{name}_hex"))
+            writer.writerow(["index", *headers])
+            for index, dec_values, hex_values in rows:
+                cells: list[int | str] = []
+                for dec_value, hex_value in zip(dec_values, hex_values):
+                    cells.extend((dec_value, hex_value))
+                writer.writerow([index, *cells])
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        words = read_samples(
+            args.bin_file,
+            bytes_per_sample=WORD_BYTES,
+            endian=args.endian,
+            signed=False,
+            offset=args.offset,
+            count=args.count,
+        )
+    except OSError as exc:
+        print(f"error: cannot read {args.bin_file}: {exc}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    rows = []
+    for index, raw_128, _value in words:
+        rows.append(
+            (
+                index,
+                split_channels(raw_128, signed=args.signed),
+                channel_hex_values(raw_128),
+            )
+        )
+
+    print_rows(rows, output_format=args.format)
+    if args.csv is not None:
+        write_csv(args.csv, rows, output_format=args.format)
+        print(f"saved CSV: {args.csv}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
